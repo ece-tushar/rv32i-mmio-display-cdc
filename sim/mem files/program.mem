@@ -1,103 +1,140 @@
-00000513
-08000593
-00000613
-00000693
-00a682b3
-0002a483
-40002283
-0012f293
-fe029ce3
-40902023
-00468693
-08000293
-fe5690e3
-00000693
-ffc68293
-07f2f293
-00a282b3
-0002a303
-00a682b3
-0002a383
-00468293
-07f2f293
-00a282b3
-0002a403
-00000a13
-00000a93
-00000b13
-006a7bb3
-006a4a33
-017afc33
-017acab3
-018b6b33
-008a7bb3
-008a4a33
-017afc33
-017acab3
-018b6b33
-00131493
-01f35c93
-0194e4b3
-009a7bb3
-009a4a33
-017afc33
-017acab3
-018b6b33
-00135493
-01f31c93
-0194e4b3
-009a7bb3
-009a4a33
-017afc33
-017acab3
-018b6b33
-00139493
-01f3dc93
-0194e4b3
-009a7bb3
-009a4a33
-017afc33
-017acab3
-018b6b33
-0013d493
-01f39c93
-0194e4b3
-009a7bb3
-009a4a33
-017afc33
-017acab3
-018b6b33
-00141493
-01f45c93
-0194e4b3
-009a7bb3
-009a4a33
-017afc33
-017acab3
-018b6b33
-00145493
-01f41c93
-0194e4b3
-009a7bb3
-009a4a33
-017afc33
-017acab3
-018b6b33
-007a64b3
-0154f4b3
-fffb4c93
-0194f4b3
-00b682b3
-0092a023
-40002283
-0012f293
-fe029ce3
-40902023
-00468693
-08000293
-ea569ae3
-000502b3
-00058533
-000285b3
-00160613
-e9dff06f
+// =====================================================================
+// Conway's Game of Life on the RV32I core, streamed to the display FIFO
+// ---------------------------------------------------------------------
+// DM layout : grid A = bytes 0x00-0x7F (seed from data.mem)
+//             grid B = bytes 0x80-0xFF
+//             32 rows x 32 bits, row 0 first, bit 31 = leftmost cell
+// MMIO 0x400: lw -> {31'b0, full}   (async FIFO full flag)
+//             sw -> push one 32-bit row to the display
+// Every push is preceded by polling the full flag: a sw to 0x400 while
+// the FIFO is full would be dropped.
+// Registers : x10 read grid, x11 write grid, x12 generation,
+//             x13 row offset, x5 scratch / MMIO status
+// Format    : word  // byte address  asm  -- comment
+// =====================================================================
+
+// ---- setup ----
+00000513  // 0x000             addi x10, x0, 0         -- x10 = read grid  = grid A (bytes 0x00-0x7F), holds the seed
+08000593  // 0x004             addi x11, x0, 128       -- x11 = write grid = grid B (bytes 0x80-0xFF)
+00000613  // 0x008             addi x12, x0, 0         -- x12 = generation counter
+00000693  // 0x00c             addi x13, x0, 0         -- x13 = row offset in bytes (0, 4, ... 124)
+
+// ---- frame 0: push the seed itself to the display ----
+00a682b3  // 0x010  seed:      add x5, x13, x10        -- x5  = address of seed row
+0002a483  // 0x014             lw x9, 0(x5)            -- x9  = seed row bitmap
+40002283  // 0x018  seed_wait: lw x5, 1024(x0)         -- MMIO status read: x5 = {31'b0, full}
+0012f293  // 0x01c             andi x5, x5, 1          -- keep bit 0 (full flag)
+fe029ce3  // 0x020             bne x5, x0, seed_wait   -- FIFO full -> keep polling
+40902023  // 0x024             sw x9, 1024(x0)         -- MMIO push: row goes into the async FIFO
+00468693  // 0x028             addi x13, x13, 4        -- next row
+08000293  // 0x02c             addi x5, x0, 128        -- x5 = 128 bytes = 32 rows
+fe5690e3  // 0x030             bne x13, x5, seed       -- until all 32 seed rows are pushed
+
+// ---- one generation: compute and push 32 rows ----
+00000693  // 0x034  gen:       addi x13, x0, 0         -- start of generation: row offset = 0
+
+// fetch the three rows around row r (wrap-around at top and bottom)
+ffc68293  // 0x038  row:       addi x5, x13, -4        -- up row offset = row - 4 ...
+07f2f293  // 0x03c             andi x5, x5, 127        -- ... wrapped to 0..124 (row 0's up is row 31)
+00a282b3  // 0x040             add x5, x5, x10         -- + read grid base
+0002a303  // 0x044             lw x6, 0(x5)            -- x6 = UP row
+00a682b3  // 0x048             add x5, x13, x10        -- mid row address
+0002a383  // 0x04c             lw x7, 0(x5)            -- x7 = MID row (the cells being updated)
+00468293  // 0x050             addi x5, x13, 4         -- down row offset = row + 4 ...
+07f2f293  // 0x054             andi x5, x5, 127        -- ... wrapped (row 31's down is row 0)
+00a282b3  // 0x058             add x5, x5, x10         -- + read grid base
+0002a403  // 0x05c             lw x8, 0(x5)            -- x8 = DOWN row
+
+// neighbour count, bit-sliced: every bit position is its own cell,
+// so 8 'planes' (one per neighbour direction) are summed for all
+// 32 cells of the row at once with half-adder logic
+00000a13  // 0x060             addi x20, x0, 0         -- x20 = count bit 0   (32 cells counted in parallel)
+00000a93  // 0x064             addi x21, x0, 0         -- x21 = count bit 1
+00000b13  // 0x068             addi x22, x0, 0         -- x22 = 'count >= 4' (sticky)
+
+// vertical neighbours
+006a7bb3  // 0x06c             and x23, x20, x6        -- add plane UP: carry0 = bit0 & plane
+006a4a33  // 0x070             xor x20, x20, x6        -- bit0 ^= plane
+017afc33  // 0x074             and x24, x21, x23       -- carry1 = bit1 & carry0
+017acab3  // 0x078             xor x21, x21, x23       -- bit1 ^= carry0
+018b6b33  // 0x07c             or x22, x22, x24        -- (>=4) |= carry1
+008a7bb3  // 0x080             and x23, x20, x8        -- add plane DOWN: carry0 = bit0 & plane
+008a4a33  // 0x084             xor x20, x20, x8        -- bit0 ^= plane
+017afc33  // 0x088             and x24, x21, x23       -- carry1 = bit1 & carry0
+017acab3  // 0x08c             xor x21, x21, x23       -- bit1 ^= carry0
+018b6b33  // 0x090             or x22, x22, x24        -- (>=4) |= carry1
+
+// diagonal and horizontal neighbours: rotate a row by one bit
+00131493  // 0x094             slli x9, x6, 1          -- x9 = UP rotated left (1-bit rotate with wrap) ...
+01f35c93  // 0x098             srli x25, x6, 31        -- ... bit shifted out ...
+0194e4b3  // 0x09c             or x9, x9, x25          -- ... wraps around to the other edge
+009a7bb3  // 0x0a0             and x23, x20, x9        -- add plane UP-left: carry0 = bit0 & plane
+009a4a33  // 0x0a4             xor x20, x20, x9        -- bit0 ^= plane
+017afc33  // 0x0a8             and x24, x21, x23       -- carry1 = bit1 & carry0
+017acab3  // 0x0ac             xor x21, x21, x23       -- bit1 ^= carry0
+018b6b33  // 0x0b0             or x22, x22, x24        -- (>=4) |= carry1
+00135493  // 0x0b4             srli x9, x6, 1          -- x9 = UP rotated right (1-bit rotate with wrap) ...
+01f31c93  // 0x0b8             slli x25, x6, 31        -- ... bit shifted out ...
+0194e4b3  // 0x0bc             or x9, x9, x25          -- ... wraps around to the other edge
+009a7bb3  // 0x0c0             and x23, x20, x9        -- add plane UP-right: carry0 = bit0 & plane
+009a4a33  // 0x0c4             xor x20, x20, x9        -- bit0 ^= plane
+017afc33  // 0x0c8             and x24, x21, x23       -- carry1 = bit1 & carry0
+017acab3  // 0x0cc             xor x21, x21, x23       -- bit1 ^= carry0
+018b6b33  // 0x0d0             or x22, x22, x24        -- (>=4) |= carry1
+00139493  // 0x0d4             slli x9, x7, 1          -- x9 = MID rotated left (1-bit rotate with wrap) ...
+01f3dc93  // 0x0d8             srli x25, x7, 31        -- ... bit shifted out ...
+0194e4b3  // 0x0dc             or x9, x9, x25          -- ... wraps around to the other edge
+009a7bb3  // 0x0e0             and x23, x20, x9        -- add plane MID-left: carry0 = bit0 & plane
+009a4a33  // 0x0e4             xor x20, x20, x9        -- bit0 ^= plane
+017afc33  // 0x0e8             and x24, x21, x23       -- carry1 = bit1 & carry0
+017acab3  // 0x0ec             xor x21, x21, x23       -- bit1 ^= carry0
+018b6b33  // 0x0f0             or x22, x22, x24        -- (>=4) |= carry1
+0013d493  // 0x0f4             srli x9, x7, 1          -- x9 = MID rotated right (1-bit rotate with wrap) ...
+01f39c93  // 0x0f8             slli x25, x7, 31        -- ... bit shifted out ...
+0194e4b3  // 0x0fc             or x9, x9, x25          -- ... wraps around to the other edge
+009a7bb3  // 0x100             and x23, x20, x9        -- add plane MID-right: carry0 = bit0 & plane
+009a4a33  // 0x104             xor x20, x20, x9        -- bit0 ^= plane
+017afc33  // 0x108             and x24, x21, x23       -- carry1 = bit1 & carry0
+017acab3  // 0x10c             xor x21, x21, x23       -- bit1 ^= carry0
+018b6b33  // 0x110             or x22, x22, x24        -- (>=4) |= carry1
+00141493  // 0x114             slli x9, x8, 1          -- x9 = DOWN rotated left (1-bit rotate with wrap) ...
+01f45c93  // 0x118             srli x25, x8, 31        -- ... bit shifted out ...
+0194e4b3  // 0x11c             or x9, x9, x25          -- ... wraps around to the other edge
+009a7bb3  // 0x120             and x23, x20, x9        -- add plane DOWN-left: carry0 = bit0 & plane
+009a4a33  // 0x124             xor x20, x20, x9        -- bit0 ^= plane
+017afc33  // 0x128             and x24, x21, x23       -- carry1 = bit1 & carry0
+017acab3  // 0x12c             xor x21, x21, x23       -- bit1 ^= carry0
+018b6b33  // 0x130             or x22, x22, x24        -- (>=4) |= carry1
+00145493  // 0x134             srli x9, x8, 1          -- x9 = DOWN rotated right (1-bit rotate with wrap) ...
+01f41c93  // 0x138             slli x25, x8, 31        -- ... bit shifted out ...
+0194e4b3  // 0x13c             or x9, x9, x25          -- ... wraps around to the other edge
+009a7bb3  // 0x140             and x23, x20, x9        -- add plane DOWN-right: carry0 = bit0 & plane
+009a4a33  // 0x144             xor x20, x20, x9        -- bit0 ^= plane
+017afc33  // 0x148             and x24, x21, x23       -- carry1 = bit1 & carry0
+017acab3  // 0x14c             xor x21, x21, x23       -- bit1 ^= carry0
+018b6b33  // 0x150             or x22, x22, x24        -- (>=4) |= carry1
+
+// Life rule B3/S23
+007a64b3  // 0x154             or x9, x20, x7          -- next = (bit0 | alive) & bit1 & ~(>=4):
+0154f4b3  // 0x158             and x9, x9, x21         --   count 3 -> born/survives, count 2 -> survives if alive
+fffb4c93  // 0x15c             xori x25, x22, -1       -- x25 = ~(count >= 4)
+0194f4b3  // 0x160             and x9, x9, x25         -- x9 = new row
+
+// store the new row and stream it to the display
+00b682b3  // 0x164             add x5, x13, x11        -- address in the write grid
+0092a023  // 0x168             sw x9, 0(x5)            -- store new row into the write grid (state for next generation)
+// poll the async FIFO full flag (CPU clock domain, no sync needed)
+40002283  // 0x16c  row_wait:  lw x5, 1024(x0)         -- MMIO status read: x5 = {31'b0, full}
+0012f293  // 0x170             andi x5, x5, 1          -- keep bit 0 (full flag)
+fe029ce3  // 0x174             bne x5, x0, row_wait    -- FIFO full -> keep polling (display hasn't drained yet)
+40902023  // 0x178             sw x9, 1024(x0)         -- MMIO push: new row goes to the display
+00468693  // 0x17c             addi x13, x13, 4        -- next row
+08000293  // 0x180             addi x5, x0, 128        -- x5 = 128 bytes = 32 rows
+ea569ae3  // 0x184             bne x13, x5, row        -- until all 32 rows of this generation are done
+
+// ---- end of generation ----
+000502b3  // 0x188             add x5, x10, x0         -- swap grids: x5 = old read base
+00058533  // 0x18c             add x10, x11, x0        -- read grid  = the one just written
+000285b3  // 0x190             add x11, x5, x0         -- write grid = the old read grid
+00160613  // 0x194             addi x12, x12, 1        -- generation++
+e9dff06f  // 0x198             jal x0, gen             -- forever: next generation
