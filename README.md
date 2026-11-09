@@ -2,7 +2,7 @@
 
 A 5-stage pipelined RISC-V (RV32I) core written in Verilog, extended into a small SoC: a memory-mapped display subsystem on its own, unrelated clock, connected through an asynchronous FIFO. The demo program runs Conway's Game of Life on the core and streams every generation to the display.
 
-![Game of Life running on the core](images/life.gif)
+![Game of Life running on the core](images/life_preview.gif)
 
 *Each frame above was computed by the CPU, pushed through the async FIFO across clock domains, and captured from the display side of the simulation.*
 
