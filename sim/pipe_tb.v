@@ -2,7 +2,7 @@
 
 module dptb;
 
-parameter N_GEN = 20;               // frames to print: gen 0 (seed) to gen N_GEN-1
+parameter N_GEN = 40;               // frames to print: gen 0 (seed) to gen N_GEN-1
 
 reg Clk, Rst;
 reg rd_clk, rd_rst;
