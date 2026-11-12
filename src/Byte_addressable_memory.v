@@ -12,6 +12,20 @@ module ByteAdrRAM #(
     output [DATA_WIDTH-1:0] DataOut
 );
 
+    // 000000_00   000000_01   000000_10   000000_11
+    // 000001_00   000001_01   000001_10   000001_11
+    // 000010_00   000010_01   000010_10   000010_11
+    // 000011_00   000011_01   000011_10   000011_11
+    // 000100_00   000100_01   000100_10   000100_11
+    // 0  0  0  1  0  0  1  0 
+    // 7  6  5  4  3  2  1  0
+    
+    // WHAT HAPPENS IF HALF_WORD AND WORD DEMAND END ADDRESS? i.e. 
+    // WHAT DO TO IF WORD TYPE DEMANDS CONTENTS AT ADDR 1111_1111? 
+    // - As of now I leave this responsibility to the programmer.
+    
+    // Haven't included sign-extension in the memory itself.
+
 localparam ADDR_WIDTH = $clog2(BYTE_DEPTH);
 localparam CELL_DEPTH = BYTE_DEPTH / 4;
 
