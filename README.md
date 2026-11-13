@@ -17,9 +17,6 @@ A 5-stage pipelined RISC-V (RV32I) core written in Verilog, extended into a smal
 
 ---
 
-## Architecture
-
-![Datapath](images/display_subsystem.png)
 
 ### Pipeline
 
@@ -44,15 +41,6 @@ A 5-stage pipelined RISC-V (RV32I) core written in Verilog, extended into a smal
 
 ### Display subsystem
 
-```
-          CPU clock domain                 |            display clock domain
-                                           |
- sw 0x400 ──► wr_en ──► ┌──────────────────────────────┐
- store data ──────────► │        async FIFO            │ ──► disp_ctrl ──► display_model
- lw 0x400 ◄── full ◄─── │  dual-clock RAM, Gray ptrs,  │      (row counter,    (32 × 32)
-                        │  2-flop synchronizers        │       valid bit)
-                        └──────────────────────────────┘
-```
 
 | Module | Role |
 |---|---|
